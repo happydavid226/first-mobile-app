@@ -1,4 +1,5 @@
-import { useState } from "react";
+// src/app/index.tsx
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,84 +10,231 @@ import {
   StatusBar,
   Switch,
   Image,
+  ActivityIndicator,
+  Platform,
+  Alert,
 } from "react-native";
 import Slider from "@react-native-community/slider";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
+import WebCamera from "../components/WebCamera";
 
 const foods = ["Rice", "Pizza", "Chicken", "Fish", "Other"];
 const genders = ["Male", "Female", "Prefer not to say"];
 
 export default function App() {
+  // Client-side hydration guard for Expo Web
+  const [isClient, setIsClient] = useState(false);
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [gender, setGender] = useState("");
   const [favoriteFood, setFavoriteFood] = useState("");
-  const [file, setFile] = useState<any>(null);
-  const [cameraImage, setCameraImage] = useState<any>(null);
+  const [file, setFile] = useState(null);
+  const [cameraImage, setCameraImage] = useState(null);
   const [satisfaction, setSatisfaction] = useState(5);
   const [darkMode, setDarkMode] = useState(false);
   const [aboutMe, setAboutMe] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // NEW: controls the web-only camera modal
+  const [showWebCamera, setShowWebCamera] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  // ---------------------------------------------------------------------
+  // File picker (supporting document)
+  // ---------------------------------------------------------------------
   async function pickFile() {
-    const result = await DocumentPicker.getDocumentAsync();
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
 
-    if (!result.canceled) {
-      setFile(result.assets[0]);
+      if (!result.canceled) {
+        setFile(result.assets[0]);
+      }
+    } catch (error) {
+      console.error("Error picking file:", error);
+      Alert.alert("Error", "Could not pick a file. Please try again.");
     }
   }
 
+  // ---------------------------------------------------------------------
+  // Camera / Profile picture
+  // ---------------------------------------------------------------------
   async function takePicture() {
-    // Request camera permissions first
-    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+    try {
+      // --- Web: use our own getUserMedia camera modal ---
+      if (Platform.OS === "web") {
+        setShowWebCamera(true);
+        return;
+      }
 
-    if (!permissionResult.granted) {
-      alert("Permission to access camera is required!");
+      // --- Native: request camera permission ---
+      const permissionResult =
+        await ImagePicker.requestCameraPermissionsAsync();
+
+      if (!permissionResult.granted) {
+        Alert.alert(
+          "Permission required",
+          "Permission to access the camera is required to take a profile picture.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+
+      // --- Native: open camera ---
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        setCameraImage(result.assets[0]);
+      }
+    } catch (error) {
+      console.error("Error taking picture:", error);
+      Alert.alert("Error", "Could not open the camera. Please try again.");
+    }
+  }
+
+  // Called by WebCamera when the user confirms the shot (web only)
+  function handleWebCapture(dataUrl) {
+    setCameraImage({
+      uri: dataUrl,
+      fileName: `photo-${Date.now()}.jpg`,
+      mimeType: "image/jpeg",
+      isDataUrl: true, // marker for FormData handling below
+    });
+    setShowWebCamera(false);
+  }
+
+  // ---------------------------------------------------------------------
+  // Submit
+  // ---------------------------------------------------------------------
+  async function handleSubmit() {
+    if (!name || !email) {
+      Alert.alert("Missing information", "Please fill in your name and email.");
       return;
     }
 
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
+    if (!accepted) {
+      Alert.alert(
+        "Terms not accepted",
+        "Please accept the terms and conditions before continuing."
+      );
+      return;
+    }
 
-    if (!result.canceled) {
-      setCameraImage(result.assets[0]);
+    setIsSubmitting(true);
+
+    try {
+      // Build FormData so both files can actually be uploaded
+      const formData = new FormData();
+
+      formData.append("name", name);
+      formData.append("email", email);
+      formData.append("password", password);
+      formData.append("gender", gender);
+      formData.append("favoriteFood", favoriteFood);
+      formData.append("satisfaction", String(satisfaction));
+      formData.append("darkMode", String(darkMode));
+      formData.append("aboutMe", aboutMe);
+      formData.append("accepted", String(accepted));
+
+      // Attach the captured camera image
+      if (cameraImage) {
+        if (Platform.OS === "web" && cameraImage.isDataUrl) {
+          // Web: data URL → Blob
+          const res = await fetch(cameraImage.uri);
+          const blob = await res.blob();
+          formData.append(
+            "cameraImage",
+            blob,
+            cameraImage.fileName || `photo-${Date.now()}.jpg`
+          );
+        } else {
+          // Native: standard { uri, name, type } object
+          const filename =
+            cameraImage.fileName ??
+            cameraImage.uri.split("/").pop() ??
+            `photo-${Date.now()}.jpg`;
+          const match = /\.(\w+)$/.exec(filename);
+          const type = cameraImage.mimeType
+            ? cameraImage.mimeType
+            : match
+            ? `image/${match[1]}`
+            : "image/jpeg";
+
+          formData.append("cameraImage", {
+            uri: cameraImage.uri,
+            name: filename,
+            type,
+          });
+        }
+      }
+
+      // Attach the supporting document
+      if (file) {
+        if (Platform.OS === "web" && file.file) {
+          // Web document picker gives a real File object
+          formData.append("file", file.file, file.name || "document");
+        } else {
+          formData.append("file", {
+            uri: file.uri,
+            name: file.name ?? `document-${Date.now()}`,
+            type: file.mimeType ?? "application/octet-stream",
+          });
+        }
+      }
+
+      // Debug: log what will be sent
+      console.log("FormData entries:");
+      for (const [key, value] of formData.entries()) {
+        console.log(`  ${key}:`, value);
+      }
+
+      // --- Replace this URL with your real endpoint ---
+      // const response = await fetch("https://your-api.com/submit", {
+      //   method: "POST",
+      //   body: formData,
+      //   headers: {
+      //     // Do NOT set Content-Type manually — let fetch set the boundary
+      //     Accept: "application/json",
+      //   },
+      // });
+      //
+      // if (!response.ok) {
+      //   throw new Error(`Server responded with ${response.status}`);
+      // }
+      //
+      // const data = await response.json();
+      // console.log("Server response:", data);
+
+      Alert.alert("Success", "Your account details were submitted.");
+    } catch (error) {
+      console.error("Submit error:", error);
+      Alert.alert("Submission failed", "Please try again later.");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
-  function handleSubmit() {
-    const formData = {
-      name,
-      email,
-      password,
-      gender,
-      favoriteFood,
-      satisfaction,
-      darkMode,
-      aboutMe,
-      accepted,
-      file: file
-        ? {
-            name: file.name,
-            uri: file.uri,
-            mimeType: file.mimeType,
-          }
-        : null,
-      cameraImage: cameraImage
-        ? {
-            uri: cameraImage.uri,
-            width: cameraImage.width,
-            height: cameraImage.height,
-          }
-        : null,
-    };
-  
-    console.log(formData);
+  // Prevent server/client hydration mismatch error on web
+  if (!isClient) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#365FCA" />
+      </View>
+    );
   }
 
   return (
@@ -155,9 +303,7 @@ export default function App() {
                   style={styles.choiceRow}
                 >
                   <View style={styles.radioOuter}>
-                    {gender === option && (
-                      <View style={styles.radioInner} />
-                    )}
+                    {gender === option && <View style={styles.radioInner} />}
                   </View>
                   <Text style={styles.choiceText}>{option}</Text>
                 </Pressable>
@@ -190,7 +336,7 @@ export default function App() {
               ))}
             </View>
           </View>
-          
+
           {/* Satisfaction range */}
           <View style={styles.section}>
             <View style={styles.rangeHeader}>
@@ -215,7 +361,7 @@ export default function App() {
 
               <Text style={styles.rangeLabel}>10</Text>
             </View>
-                
+
             <Text style={styles.helperText}>
               Move the slider to select your satisfaction level.
             </Text>
@@ -270,7 +416,10 @@ export default function App() {
 
             {cameraImage && (
               <View style={styles.previewContainer}>
-                <Image source={{ uri: cameraImage.uri }} style={styles.previewImage} />
+                <Image
+                  source={{ uri: cameraImage.uri }}
+                  style={styles.previewImage}
+                />
               </View>
             )}
           </View>
@@ -295,10 +444,7 @@ export default function App() {
             style={styles.termsRow}
           >
             <View
-              style={[
-                styles.checkbox,
-                accepted && styles.checkboxSelected,
-              ]}
+              style={[styles.checkbox, accepted && styles.checkboxSelected]}
             >
               {accepted && <Text style={styles.checkmark}>✓</Text>}
             </View>
@@ -309,12 +455,18 @@ export default function App() {
 
           <Pressable
             onPress={handleSubmit}
+            disabled={isSubmitting}
             style={({ pressed }) => [
               styles.submitButton,
               pressed && styles.submitPressed,
+              isSubmitting && styles.submitDisabled,
             ]}
           >
-            <Text style={styles.submitText}>Create account</Text>
+            {isSubmitting ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.submitText}>Create account</Text>
+            )}
           </Pressable>
 
           <Text style={styles.footer}>
@@ -322,11 +474,25 @@ export default function App() {
           </Text>
         </View>
       </ScrollView>
+
+      {/* Web-only camera modal */}
+      {showWebCamera && (
+        <WebCamera
+          onCapture={handleWebCapture}
+          onClose={() => setShowWebCamera(false)}
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#F3F5F7",
+  },
   page: {
     flex: 1,
     backgroundColor: "#F3F5F7",
@@ -515,9 +681,14 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingVertical: 14,
     alignItems: "center",
+    justifyContent: "center",
+    minHeight: 48,
   },
   submitPressed: {
     opacity: 0.82,
+  },
+  submitDisabled: {
+    opacity: 0.6,
   },
   submitText: {
     color: "#FFFFFF",
