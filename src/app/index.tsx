@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import {
   View,
@@ -8,8 +7,12 @@ import {
   ScrollView,
   StyleSheet,
   StatusBar,
+  Switch,
+  Image,
 } from "react-native";
+import Slider from "@react-native-community/slider";
 import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
 
 const foods = ["Rice", "Pizza", "Chicken", "Fish", "Other"];
 const genders = ["Male", "Female", "Prefer not to say"];
@@ -22,12 +25,37 @@ export default function App() {
   const [gender, setGender] = useState("");
   const [favoriteFood, setFavoriteFood] = useState("");
   const [file, setFile] = useState<any>(null);
+  const [cameraImage, setCameraImage] = useState<any>(null);
+  const [satisfaction, setSatisfaction] = useState(5);
+  const [darkMode, setDarkMode] = useState(false);
+  const [aboutMe, setAboutMe] = useState("");
 
   async function pickFile() {
     const result = await DocumentPicker.getDocumentAsync();
 
     if (!result.canceled) {
       setFile(result.assets[0]);
+    }
+  }
+
+  async function takePicture() {
+    // Request camera permissions first
+    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+
+    if (!permissionResult.granted) {
+      alert("Permission to access camera is required!");
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      setCameraImage(result.assets[0]);
     }
   }
 
@@ -38,6 +66,9 @@ export default function App() {
       password,
       gender,
       favoriteFood,
+      satisfaction,
+      darkMode,
+      aboutMe,
       accepted,
       file: file
         ? {
@@ -46,8 +77,15 @@ export default function App() {
             mimeType: file.mimeType,
           }
         : null,
+      cameraImage: cameraImage
+        ? {
+            uri: cameraImage.uri,
+            width: cameraImage.width,
+            height: cameraImage.height,
+          }
+        : null,
     };
-
+  
     console.log(formData);
   }
 
@@ -151,6 +189,90 @@ export default function App() {
                 </Pressable>
               ))}
             </View>
+          </View>
+          
+          {/* Satisfaction range */}
+          <View style={styles.section}>
+            <View style={styles.rangeHeader}>
+              <Text style={styles.label}>How satisfied are you?</Text>
+              <Text style={styles.rangeValue}>{satisfaction}/10</Text>
+            </View>
+
+            <View style={styles.sliderContainer}>
+              <Text style={styles.rangeLabel}>1</Text>
+
+              <Slider
+                style={styles.slider}
+                minimumValue={1}
+                maximumValue={10}
+                step={1}
+                value={satisfaction}
+                onValueChange={setSatisfaction}
+                minimumTrackTintColor="#365FCA"
+                maximumTrackTintColor="#D9DEE5"
+                thumbTintColor="#365FCA"
+              />
+
+              <Text style={styles.rangeLabel}>10</Text>
+            </View>
+                
+            <Text style={styles.helperText}>
+              Move the slider to select your satisfaction level.
+            </Text>
+          </View>
+
+          {/* Light and dark mode switch */}
+          <View style={styles.section}>
+            <View style={styles.switchRow}>
+              <View style={styles.switchDescription}>
+                <Text style={styles.label}>Appearance</Text>
+                <Text style={styles.helperText}>
+                  {darkMode ? "Dark mode selected" : "Light mode selected"}
+                </Text>
+              </View>
+
+              <Switch
+                value={darkMode}
+                onValueChange={setDarkMode}
+                trackColor={{ false: "#D1D5DB", true: "#A5B4FC" }}
+                thumbColor={darkMode ? "#365FCA" : "#FFFFFF"}
+              />
+            </View>
+          </View>
+
+          {/* About me multiline text box */}
+          <View style={styles.section}>
+            <Text style={styles.label}>Tell us something about you</Text>
+            <TextInput
+              style={styles.textArea}
+              placeholder="Share your interests, hobbies, or anything you'd like us to know..."
+              placeholderTextColor="#9299A3"
+              value={aboutMe}
+              onChangeText={setAboutMe}
+              multiline
+              numberOfLines={5}
+              textAlignVertical="top"
+              maxLength={500}
+            />
+            <Text style={styles.characterCount}>
+              {aboutMe.length}/500 characters
+            </Text>
+          </View>
+
+          {/* Camera Capture Option */}
+          <View style={styles.section}>
+            <Text style={styles.label}>Profile Picture</Text>
+            <Pressable style={styles.fileButton} onPress={takePicture}>
+              <Text style={styles.fileButtonText}>
+                {cameraImage ? "Retake photo" : "📸 Take a picture"}
+              </Text>
+            </Pressable>
+
+            {cameraImage && (
+              <View style={styles.previewContainer}>
+                <Image source={{ uri: cameraImage.uri }} style={styles.previewImage} />
+              </View>
+            )}
           </View>
 
           <View style={styles.section}>
@@ -344,6 +466,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#64748B",
   },
+  previewContainer: {
+    marginTop: 10,
+    width: 100,
+    height: 100,
+    borderRadius: 8,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#D9DEE5",
+  },
+  previewImage: {
+    width: "100%",
+    height: "100%",
+  },
   termsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -395,5 +530,67 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#8992A0",
     lineHeight: 17,
+  },
+  rangeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  rangeValue: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#3159B8",
+    backgroundColor: "#EDF2FF",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 7,
+  },
+  sliderContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  slider: {
+    flex: 1,
+    height: 40,
+  },
+  rangeLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#687385",
+  },
+  switchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  switchDescription: {
+    flex: 1,
+  },
+  helperText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#7A8493",
+  },
+  textArea: {
+    width: "100%",
+    minHeight: 125,
+    borderWidth: 1,
+    borderColor: "#D9DEE5",
+    borderRadius: 9,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+    fontSize: 14,
+    lineHeight: 21,
+    color: "#202938",
+    backgroundColor: "#FFFFFF",
+  },
+  characterCount: {
+    marginTop: 6,
+    fontSize: 11,
+    color: "#8992A0",
+    textAlign: "right",
   },
 });
